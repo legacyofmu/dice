@@ -1,52 +1,97 @@
+use std::collections::HashMap;
 use rand::Rng;
-use std::io;
+use dices::Dice;
+use clap::Parser;
 
-fn main() {
-    println!("Welcome to Dodecahedral Dice Game!");
-    println!("Press Enter to start. Press <q> to exit.");
+#[derive(Parser)]
+struct Cli {
+    #[clap(short, long, default_value = "2")]
+    players: usize,
+}
 
-    let mut point: Option<u8> = None;
+#[derive(Debug)]
+struct Player {
+    name: String,
+    score: u32,
+    stats: Stats,
+}
+
+#[derive(Debug, Default)]
+struct Stats {
+    total_rolls: u32,
+    roll_distribution: HashMap<u8, u32>,
+    wins: u32,
+    losses: u32,
+}
+
+impl Player {
+    fn new(name: String) -> Self {
+        Self {
+            name,
+            score: 0,
+            stats: Stats::default(),
+        }
+    }
+
+    fn roll_dice(&mut self) -> u8 {
+        let die = rand::thread_rng().gen_range(1..=12);
+        self.stats.total_rolls += 1;
+        *self.stats.roll_distribution.entry(die).or_insert(0) += 1;
+        die
+    }
+}
+
+
+fn main() -> anyhow::Result<()> {
+    let args = Cli::parse();
+    let mut players: Vec<Player> = (1..=args.players)
+        .map(|i| Player::new(format!("Player {}", i)))
+        .collect();
+
+    let target_score = 100;
+    let mut round = 1;
 
     loop {
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).expect("Input Error");
+        println!("\n=== Round {} ===", round);
 
-        if input.trim().eq_ignore_ascii_case("q") {
-            println!("End Game.");
-            break;
+        for player in &mut players {
+            println!("{} Turn", player.name);
+            let roll = player.roll_dice();
+            player.score += roll as u32;
+
+            println!("Dice: {} -> Total score: {}", roll, player.score);
+
+            if player.score >= target_score {
+                println!("🎉 {} Win! 🎉", player.name);
+                show_statistics(&players);
+                return Ok(());
+            }
         }
-
-        let dice = rand::thread_rng().gen_range(1..=12);
-        println!("Dice result: {}", dice);
-
-        match point {
-            None => handle_first_roll(dice, &mut point),
-            Some(p) => handle_point_roll(dice, p, &mut point),
-        }
+        round += 1;
     }
 }
 
-fn handle_first_roll(dice: u8, point: &mut Option<u8>) {
-    if dice == 7 || dice == 11 {
-        println!("Congratulation! You win on the first try.");
-    } else if dice == 2 || dice == 3 || dice == 12 {
-        println!("Too bad, you lost on the first try.");
-    } else {
-        println!("Point Setting: {}. Roll this number again and you win!", dice);
-        *point = Some(dice);
-    }
-}
+fn show_statistics(players: &[Player]) {
+    println!("\n📊 Final Stats:");
 
-fn handle_point_roll(dice: u8, target: u8, point: &mut Option<u8>) {
-    match dice {
-        7 => {
-            println!("You got a 7. You've lost.");
-            *point = None;
+    for player in players {
+        println!("\n{}:", player.name);
+        println!("- Total Score: {}", player.score);
+        println!("- Total Rolls: {}", player.stats.total_rolls);
+
+        let dice = Dice::build_from_string("1d12").unwrap();
+        let expected_dist = dice.distribution();
+
+        println!("\nActual distribution vs Expected distribution:");
+        for (value, count) in &player.stats.roll_distribution {
+            let actual = *count as f32 / player.stats.total_rolls as f32;
+            let expected = expected_dist.iter()
+                .find(|(v, _)| *v == *value as i64)
+                .map(|(_, p)| *p)
+                .unwrap_or(0.0);
+
+            println!("{}: {:.2}% (Actual) vs {:.2}% (Expected)",
+                value, actual*100.0, expected*100.0);
         }
-        _ if dice == target => {
-            println!("Point {} achieved! You win!", target);
-            *point = None;
-        }
-        _ => println!("Current target: {}. Roll again.", target),
     }
 }
